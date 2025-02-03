@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [ "signaling", "frontend" ]
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: wasm32-unknown-unknown
+
+      - name: Build ${{ matrix.package }}
+        working-directory: videochat
+        run: cargo build -p ${{ matrix.package }} --verbose
+
+      - name: Run tests for ${{ matrix.package }}
+        working-directory: videochat
+        run: cargo test -p ${{ matrix.package }} --verbose

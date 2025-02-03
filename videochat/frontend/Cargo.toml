@@ -1,0 +1,22 @@
+[package]
+name = "frontend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+yew = { version = "0.20", features = ["csr"] }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "HtmlVideoElement",
+    "MediaDevices",
+    "MediaStream",
+    "MediaStreamConstraints",   # Add this line
+    "Navigator",                # (See below)
+    "RtcPeerConnection",
+    "RtcConfiguration"
+] }
+gloo = "0.7"
+wasm-bindgen-futures = "0.4"
