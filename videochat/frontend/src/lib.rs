@@ -3,14 +3,15 @@ use wasm_bindgen::JsCast;
 use web_sys::{
     HtmlVideoElement, MediaStream, MediaStreamConstraints, window, WebSocket,
     RtcPeerConnection, RtcConfiguration, RtcPeerConnectionIceEvent, RtcIceCandidateInit,
-    MessageEvent, MediaStreamTrack
+    MessageEvent, MediaStreamTrack, RtcSessionDescriptionInit, RtcSdpType, RtcTrackEvent,
+    RtcIceCandidate,
 };
 use yew::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use serde_json;
-use js_sys::Array;
+use js_sys::{Array, Reflect};
 use serde::{Serialize, Deserialize};
-use gloo_timers::future::TimeoutFuture;
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 enum SignalMessage {
@@ -21,167 +22,235 @@ enum SignalMessage {
 
 #[function_component(App)]
 fn app() -> Html {
-    //let video_ref = NodeRef::default(); //Bruh it took me 6 hours to fix this!!
+    // NodeRefs for the local & remote <video> elements.
     let video_ref = use_node_ref();
-    // State for storing the WebSocket connection and PeerConnection
+    let remote_video_ref = use_node_ref();
+
+    // State for the WebSocket connection and the PeerConnection.
     let ws_state = use_state(|| Option::<WebSocket>::None);
     let pc_state = use_state(|| Option::<RtcPeerConnection>::None);
 
     {
-        // Clone the states once for use within the effect.
-        let video_ref = video_ref.clone();
+        // Clone state handles for the effect.
+        let video_ref_clone = video_ref.clone();
+        let remote_video_ref_clone = remote_video_ref.clone();
         let ws_state_inner = ws_state.clone();
         let pc_state_inner = pc_state.clone();
 
-        use_effect_with_deps(move |_| {
-            // 1. Set up local video stream.
-            let window = window().expect("should have a window");
-            let navigator = window.navigator();
-            let media_devices = navigator.media_devices().expect("no media devices available");
+        use_effect_with_deps(
+            move |_| {
+                // 1. Set up local video stream.
+                let win = window().expect("should have a window");
+                let navigator = win.navigator();
+                let media_devices = navigator.media_devices().expect("no media devices available");
 
-            let constraints = MediaStreamConstraints::new();
-            constraints.set_video(&JsValue::TRUE);
-            let promise = media_devices
-                .get_user_media_with_constraints(&constraints)
-                .expect("getUserMedia should work");
+                let constraints = MediaStreamConstraints::new();
+                constraints.set_video(&JsValue::TRUE);
+                let promise = media_devices
+                    .get_user_media_with_constraints(&constraints)
+                    .expect("getUserMedia should work");
 
-            let video_ref_clone = video_ref.clone();
-            let local_stream_future = async move {
-                // Wait 3000 ms to give the DOM time to attach the video element.
-                //gloo_timers::future::TimeoutFuture::new(3000).await;
-            
-                // Log the video element from the document directly.
-                let doc = web_sys::window().unwrap().document().unwrap();
-                let video_elem = doc.query_selector("video").unwrap();
-                web_sys::console::log_1(&format!("document.querySelector('video'): {:?}", video_elem).into());
-            
-                // Now proceed to get the media stream.
-                let stream = JsFuture::from(promise)
-                    .await
-                    .expect("failed to get media stream");
-                let stream: MediaStream = stream.dyn_into().unwrap();
-                web_sys::console::log_1(&"MediaStream obtained.".into());
-            
-                // Attempt to use the NodeRef to get the video element.
-                if let Some(video) = video_ref_clone.cast::<HtmlVideoElement>() {
-                    web_sys::console::log_1(&"Video element found via NodeRef. Setting srcObject.".into());
-                    video.set_src_object(Some(&stream));
-                    if let Err(err) = video.play() {
-                        web_sys::console::log_1(&format!("Error playing video: {:?}", err).into());
-                    } else {
-                        web_sys::console::log_1(&"Video play() called successfully.".into());
+                let local_stream_future = async move {
+                    let stream_js = JsFuture::from(promise)
+                        .await
+                        .expect("failed to get media stream");
+                    let stream: MediaStream = stream_js.dyn_into().unwrap();
+
+                    // Attach local stream to local video element.
+                    if let Some(video) = video_ref_clone.cast::<HtmlVideoElement>() {
+                        // Use unchecked_ref() to match the expected type.
+                        video.set_src_object(Some(stream.unchecked_ref()));
+                        let _ = video.play();
                     }
-                } else {
-                    web_sys::console::log_1(&"No video element found via NodeRef even after delay.".into());
-                }
-                // Return the stream so it can be used later.
-                stream
-            };
-            
-            
+                    stream
+                };
 
-            // Spawn an async block to set up the PeerConnection.
-            {
-                // Clone the state handles for use inside the async block.
-                let pc_state_async = pc_state_inner.clone();
-                let ws_state_async = ws_state_inner.clone();
-                wasm_bindgen_futures::spawn_local(async move {
-                    let local_stream = local_stream_future.await;
+                // 2. Set up the PeerConnection.
+                {
+                    let pc_state_async = pc_state_inner.clone();
+                    let ws_state_async = ws_state_inner.clone();
+                    let remote_video_for_pc = remote_video_ref_clone.clone();
 
-                    // 2. Initialize the RTCPeerConnection.
-                    let config = RtcConfiguration::new();
-                    let pc = RtcPeerConnection::new_with_configuration(&config)
-                        .expect("Failed to create RTCPeerConnection");
+                    wasm_bindgen_futures::spawn_local(async move {
+                        let local_stream = local_stream_future.await;
+                        let config = RtcConfiguration::new();
+                        let pc = RtcPeerConnection::new_with_configuration(&config)
+                            .expect("Failed to create RTCPeerConnection");
 
-                    // Add all tracks from the local stream to the PeerConnection.
-                    let tracks = local_stream.get_tracks();
-                    for i in 0..tracks.length() {
-                        let track_value = tracks.get(i);
-                        if track_value.is_undefined() {
-                            continue;
-                        }
-                        // Convert the JsValue to a MediaStreamTrack.
-                        let track: MediaStreamTrack = track_value
-                            .dyn_into()
-                            .expect("Failed to cast to MediaStreamTrack");
-                        let empty_array = Array::new();
-                        let _rtp_sender = pc.add_track(&track, &local_stream, &empty_array);
-                    }
-
-                    // 3. Set up the ICE candidate event handler.
-                    {
-                        let ws_state_for_ice = ws_state_async.clone();
-                        let on_ice_candidate = Closure::wrap(Box::new(move |event: RtcPeerConnectionIceEvent| {
-                            if let Some(candidate) = event.candidate() {
-                                let candidate_str = candidate.candidate();
-                                let msg = SignalMessage::IceCandidate(candidate_str);
-                                let msg_json = serde_json::to_string(&msg).unwrap();
-                                if let Some(ref ws) = *ws_state_for_ice {
-                                    ws.send_with_str(&msg_json)
-                                        .expect("Failed to send ICE candidate");
-                                }
+                        // Add local tracks.
+                        let tracks = local_stream.get_tracks();
+                        for i in 0..tracks.length() {
+                            let track_val = tracks.get(i);
+                            if !track_val.is_undefined() {
+                                let track: MediaStreamTrack = track_val.dyn_into().unwrap();
+                                let empty_array = Array::new();
+                                let _ = pc.add_track(&track, &local_stream, &empty_array);
                             }
-                        }) as Box<dyn FnMut(_)>);
-                        pc.set_onicecandidate(Some(on_ice_candidate.as_ref().unchecked_ref()));
-                        on_ice_candidate.forget();
-                    }
+                        }
 
-                    // 4. Store the PeerConnection in state.
-                    pc_state_async.set(Some(pc));
-                });
-            }
+                        // --- Set up ontrack handler for remote streams.
+                        {
+                            let remote_video_clone = remote_video_for_pc.clone();
+                            let on_track = Closure::wrap(Box::new(move |evt: RtcTrackEvent| {
+                                let stream_val = evt.streams().get(0);
+                                if !stream_val.is_undefined() && !stream_val.is_null() {
+                                    if let Some(video) = remote_video_clone.cast::<HtmlVideoElement>() {
+                                        video.set_src_object(Some(stream_val.unchecked_ref()));
+                                        let _ = video.play();
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>);
+                            pc.set_ontrack(Some(on_track.as_ref().unchecked_ref()));
+                            on_track.forget();
+                        }
+                        // --- End ontrack handler
 
-            // 5. Establish the WebSocket connection to the signaling server.
-            {
-                let ws_state_for_ws = ws_state_inner.clone();
-                let ws_url = "ws://192.168.1.121:3030/ws"; // Replace with your actual local IP
-                let ws = WebSocket::new(ws_url).expect("WebSocket creation failed");
-                ws_state_for_ws.set(Some(ws.clone()));
-            }
+                        // --- Initiate SDP offer (if this peer is the initiator).
+                        {
+                            let ws_for_offer = ws_state_async.clone();
+                            let pc_clone = pc.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                let offer_js = JsFuture::from(pc_clone.create_offer())
+                                    .await
+                                    .expect("Offer creation failed");
+                                let offer: RtcSessionDescriptionInit = offer_js.dyn_into().unwrap();
+                                let set_ld = pc_clone.set_local_description(&offer);
+                                let _ = JsFuture::from(set_ld)
+                                    .await
+                                    .expect("Error setting local description");
+                                // Extract SDP string via Reflect.
+                                let sdp_val = Reflect::get(&offer, &JsValue::from_str("sdp"))
+                                    .unwrap()
+                                    .as_string()
+                                    .unwrap_or_default();
+                                let msg = SignalMessage::Offer(sdp_val);
+                                let msg_json = serde_json::to_string(&msg).unwrap();
+                                if let Some(ws) = ws_for_offer.as_ref() {
+                                    let _ = ws.send_with_str(&msg_json);
+                                }
+                            });
+                        }
+                        // --- End offer initiation
 
-            // 6. Set up the WebSocket message handler.
-            {
-                let pc_state_for_message = pc_state_inner.clone();
-                let ws_state_for_message = ws_state_inner.clone();
-                let on_message = Closure::wrap(Box::new(move |event: MessageEvent| {
-                    if let Some(text) = event.data().as_string() {
-                        if let Ok(signal) = serde_json::from_str::<SignalMessage>(&text) {
-                            if let Some(ref pc) = *pc_state_for_message {
-                                match signal {
-                                    SignalMessage::Offer(sdp) => {
-                                        log::info!("Received offer: {}", sdp);
-                                        // Additional offer handling here.
-                                    },
-                                    SignalMessage::Answer(sdp) => {
-                                        log::info!("Received answer: {}", sdp);
-                                        // Additional answer handling here.
-                                    },
-                                    SignalMessage::IceCandidate(candidate_str) => {
-                                        let  candidate_init = RtcIceCandidateInit::new(&candidate_str);
-                                        if let Ok(candidate) = web_sys::RtcIceCandidate::new(&candidate_init) {
-                                            let _ = pc.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&candidate));
-                                            log::info!("Added ICE candidate: {}", candidate_str);
+                        // ICE candidate handler.
+                        {
+                            let ws_for_ice = ws_state_async.clone();
+                            let on_ice_candidate = Closure::wrap(Box::new(move |evt: RtcPeerConnectionIceEvent| {
+                                if let Some(candidate) = evt.candidate() {
+                                    let candidate_str = candidate.candidate();
+                                    let msg = SignalMessage::IceCandidate(candidate_str);
+                                    let msg_json = serde_json::to_string(&msg).unwrap();
+                                    if let Some(ws) = ws_for_ice.as_ref() {
+                                        let _ = ws.send_with_str(&msg_json);
+                                    }
+                                }
+                            }) as Box<dyn FnMut(_)>);
+                            pc.set_onicecandidate(Some(on_ice_candidate.as_ref().unchecked_ref()));
+                            on_ice_candidate.forget();
+                        }
+
+                        // Store the PeerConnection.
+                        pc_state_async.set(Some(pc));
+                    });
+                }
+
+                // 3. Establish the WebSocket connection.
+                {
+                    let ws_for_ws = ws_state_inner.clone();
+                    let ws_url = "ws://192.168.1.121:3030/ws"; // Use your local IP.
+                    let ws = WebSocket::new(ws_url).expect("WebSocket creation failed");
+                    ws_for_ws.set(Some(ws));
+                }
+
+                // 4. Set up the WebSocket message handler.
+                {
+                    // Clone the state handle once for use in this block.
+                    let ws_for_msg = ws_state_inner.clone();
+                    let pc_for_msg = pc_state_inner.clone();
+                    // Create a clone for the closure (so the original remains available).
+                    let ws_for_msg_inner = ws_for_msg.clone();
+                    let on_message = Closure::wrap(Box::new(move |evt: MessageEvent| {
+                        if let Some(txt) = evt.data().as_string() {
+                            if let Ok(signal) = serde_json::from_str::<SignalMessage>(&txt) {
+                                if let Some(pc) = pc_for_msg.as_ref() {
+                                    match signal {
+                                        SignalMessage::Offer(sdp_str) => {
+                                            let mut offer_desc = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
+                                            offer_desc.set_sdp(&sdp_str);
+                                            let pc_for_offer = pc_for_msg.clone();
+                                            let ws_for_offer = ws_for_msg_inner.clone();
+                                            wasm_bindgen_futures::spawn_local(async move {
+                                                if let Some(pc) = pc_for_offer.as_ref() {
+                                                    let set_rd_prom = pc.set_remote_description(&offer_desc);
+                                                    let _ = JsFuture::from(set_rd_prom)
+                                                        .await
+                                                        .expect("Error setting remote description");
+                                                    let ans_js = JsFuture::from(pc.create_answer())
+                                                        .await
+                                                        .expect("Error creating answer");
+                                                    let answer: RtcSessionDescriptionInit = ans_js.dyn_into().unwrap();
+                                                    let set_ld = pc.set_local_description(&answer);
+                                                    let _ = JsFuture::from(set_ld)
+                                                        .await
+                                                        .expect("Error setting local description for answer");
+                                                    let sdp_val = Reflect::get(&answer, &JsValue::from_str("sdp"))
+                                                        .unwrap()
+                                                        .as_string()
+                                                        .unwrap_or_default();
+                                                    web_sys::console::log_1(&format!("Created answer: {}", sdp_val).into());
+                                                    let msg = SignalMessage::Answer(sdp_val);
+                                                    let msg_json = serde_json::to_string(&msg).unwrap();
+                                                    if let Some(ws) = ws_for_offer.as_ref() {
+                                                        let _ = ws.send_with_str(&msg_json);
+                                                    }
+                                                }
+                                            });
+                                        },
+                                        SignalMessage::Answer(sdp_str) => {
+                                            let mut ans_desc = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
+                                            ans_desc.set_sdp(&sdp_str);
+                                            let pc_for_ans = pc_for_msg.clone();
+                                            wasm_bindgen_futures::spawn_local(async move {
+                                                if let Some(pc) = pc_for_ans.as_ref() {
+                                                    let set_rd = pc.set_remote_description(&ans_desc);
+                                                    let _ = JsFuture::from(set_rd)
+                                                        .await
+                                                        .expect("Error setting remote desc for answer");
+                                                }
+                                            });
+                                        },
+                                        SignalMessage::IceCandidate(cand_str) => {
+                                            let cand_init = RtcIceCandidateInit::new(&cand_str);
+                                            if let Ok(cand) = RtcIceCandidate::new(&cand_init) {
+                                                if let Some(pc) = pc_for_msg.as_ref() {
+                                                    let _ = pc.add_ice_candidate_with_opt_rtc_ice_candidate(Some(&cand));
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    }) as Box<dyn FnMut(_)>);
+                    if let Some(ws) = ws_for_msg.as_ref() {
+                        ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
                     }
-                }) as Box<dyn FnMut(_)>);
-                if let Some(ref ws) = *ws_state_for_message {
-                    ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+                    on_message.forget();
                 }
-                on_message.forget();
-            }
 
-            || ()
-        }, ());
+                || ()
+            },
+            // Depend on video_ref so the effect re-runs when it updates.
+            video_ref.clone()
+        );
     }
 
     html! {
         <div>
             <h1>{ "Rust Video Chat (Enhanced)" }</h1>
             <video ref={video_ref} autoplay=true playsinline=true muted=true
+                   style="width: 480px; height: 360px; background: #000;" />
+            <video ref={remote_video_ref} autoplay=true playsinline=true
                    style="width: 480px; height: 360px; background: #000;" />
             <p>{ "This is the enhanced version with WebSocket signaling and WebRTC integration." }</p>
         </div>

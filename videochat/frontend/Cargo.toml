@@ -14,7 +14,7 @@ web-sys = { version = "0.3", features = [
     "MediaDevices",
     "MediaStream",
     "MediaStreamConstraints",
-    "MediaStreamTrack",         # <-- Add this feature
+    "MediaStreamTrack",
     "Navigator",
     "RtcPeerConnection",
     "RtcConfiguration",
@@ -24,7 +24,9 @@ web-sys = { version = "0.3", features = [
     "MessageEvent",
     "WebSocket",
     "RtcRtpSender",
-    "RtcTrackEvent"
+    "RtcTrackEvent",
+    "RtcSessionDescriptionInit",  # Needed for SDP offer/answer handling
+    "RtcSdpType"                  # Needed for specifying Offer/Answer types
 ] }
 gloo = "0.7"
 wasm-bindgen-futures = "0.4"
@@ -33,3 +35,4 @@ serde_json = "1.0"
 log = "0.4"
 js-sys = "0.3"
 gloo-timers = { version = "0.2", features = ["futures"] }
+wasm-logger = "0.2"
