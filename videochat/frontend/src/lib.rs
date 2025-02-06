@@ -235,6 +235,7 @@ fn app() -> Html {
     
                     let constraints = MediaStreamConstraints::new();
                     constraints.set_video(&JsValue::TRUE);
+                    constraints.set_audio(&JsValue::TRUE);  // BRUH BRUH BRUH 
                     let promise = media_devices
                         .get_user_media_with_constraints(&constraints)
                         .expect("getUserMedia should work");
@@ -422,7 +423,7 @@ fn app() -> Html {
             <div style="display: flex; gap: 20px;">
                 <video ref={video_ref} autoplay=true playsinline=true muted=true
                     style="width: 480px; height: 360px; background: #000;" />
-                <video ref={remote_video_ref} autoplay=true playsinline=true muted=true
+                <video ref={remote_video_ref} autoplay=true playsinline=true muted=false
                     style="width: 480px; height: 360px; background: #000;" />
             </div>
             <button 
