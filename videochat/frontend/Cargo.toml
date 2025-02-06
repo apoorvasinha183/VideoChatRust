@@ -26,7 +26,10 @@ web-sys = { version = "0.3", features = [
     "RtcRtpSender",
     "RtcTrackEvent",
     "RtcSessionDescriptionInit",  # Needed for SDP offer/answer handling
-    "RtcSdpType"                  # Needed for specifying Offer/Answer types
+    "RtcSdpType",                 # Needed for specifying Offer/Answer types
+    "RtcIceServer",
+    "RtcIceTransportPolicy",
+    "RtcIceConnectionState"
 ] }
 gloo = "0.7"
 wasm-bindgen-futures = "0.4"

@@ -3,14 +3,65 @@
   <head>
     <meta charset="UTF-8" />
     <title>Rust Video Chat</title>
-  <link rel="modulepreload" href="/frontend-2a179a66543d4588.js" crossorigin="anonymous" integrity="sha384-Tq5o0e3GBbzL7GLXxcmdiA2BtXUuRfjXQNDthlmYFZ3os9QG69XgDVyZwhNQ9g+V"><link rel="preload" href="/frontend-2a179a66543d4588_bg.wasm" crossorigin="anonymous" integrity="sha384-6RmY+ACgSVhyDKBOfdSIcjWF5GsZSe1H5Hv9Gxgw2QJrRDgIxSsEHUp/CPWYsYDK" as="fetch" type="application/wasm"></head>
+    <style>
+      /* Optional styling for visitor counter */
+      #visitor-count {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: #eee;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 20px;
+      }
+    </style>
+  <link rel="modulepreload" href="/frontend-945f5068871ac5a0.js" crossorigin="anonymous" integrity="sha384-emEZyvSddkt4/5vukmnjthjnf3O+y/VZJ6/PfRbpGH4prTaOPJFRYa8/Uz2i4pca"><link rel="preload" href="/frontend-945f5068871ac5a0_bg.wasm" crossorigin="anonymous" integrity="sha384-xUlcP9GrubItqWk0bYh+AKSsWFPU9jDpa+SrpXvhhmllqBkapVuCS3iUoxA+JZaG" as="fetch" type="application/wasm"></head>
   <body>
-    <!-- The Yew app will mount to the document body -->
+    <!-- Visitor count display -->
+    <div id="visitor-count">0</div>
     
+    <!-- The Yew app will mount to the document body automatically. -->
+    
+    <!-- Add the visitor counter script -->
+    <script>
+      (function () {
+        // Change the WebSocket URL as needed.
+        const wsUrl = `wss://${window.location.host}/visitors`;
+        const countElem = document.getElementById("visitor-count");
+        if (!countElem) {
+          console.error("No element with id 'visitor-count' found.");
+          return;
+        }
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = function () {
+          console.log("Connected to visitor counter.");
+        };
+
+        ws.onmessage = function (event) {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.visitorCount !== undefined) {
+              countElem.textContent = data.visitorCount;
+            }
+          } catch (err) {
+            console.error("Error parsing visitor count message:", err);
+          }
+        };
+
+        ws.onclose = function () {
+          console.log("Disconnected from visitor counter.");
+        };
+
+        window.addEventListener("beforeunload", function () {
+          ws.close();
+        });
+      })();
+    </script>
   
 <script type="module">
-import init, * as bindings from '/frontend-2a179a66543d4588.js';
-const wasm = await init({ module_or_path: '/frontend-2a179a66543d4588_bg.wasm' });
+import init, * as bindings from '/frontend-945f5068871ac5a0.js';
+const wasm = await init({ module_or_path: '/frontend-945f5068871ac5a0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
