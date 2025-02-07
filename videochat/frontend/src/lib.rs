@@ -15,7 +15,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 mod visitor_counter;
 use visitor_counter::VisitorCounter;
-
+use web_sys::MediaTrackConstraints;
 #[derive(Serialize, Deserialize)]
 struct IceCandidateData {
     candidate: String,
@@ -48,6 +48,7 @@ fn app() -> Html {
     let ice_candidate_queue = Rc::new(RefCell::new(Vec::<String>::new()));
     // A state to ensure the call is initiated only once.
     let offer_sent = use_state(|| false);
+    let local_track_ids = Rc::new(RefCell::new(Vec::<String>::new()));  
     let offer_sent_for_button = offer_sent.clone();
 
     // Callback for when the "Start Call" button is pressed.
@@ -152,7 +153,13 @@ fn app() -> Html {
                 // Attach the ontrack handler to process remote media tracks.
                 {
                     let remote_video_clone = remote_video_ref_clone.clone();
+                    let local_track_ids_for_ontrack = local_track_ids.clone();
                     let on_track = Closure::wrap(Box::new(move |evt: RtcTrackEvent| {
+                        let incoming_id = evt.track().id();
+                        if local_track_ids_for_ontrack.borrow().contains(&incoming_id) {
+                            web_sys::console::log_1(&format!("Ignoring local track: {}", incoming_id).into());
+                            return;
+                        }
                         web_sys::console::log_1(&"Remote track event triggered".into());
                         let track = evt.track();
                         web_sys::console::log_1(&format!("Remote track kind: {}", track.kind()).into());
@@ -187,6 +194,7 @@ fn app() -> Html {
                 // Attach the onicecandidate handler to send ICE candidates via the WebSocket.
                 {
                     let pc_for_ice = pc.clone();
+                    let local_track_ids_for_async = local_track_ids.clone();
                     // Use the latest WebSocket instance via ws_ref.
                     let ws_ref_clone = ws_ref_inner.clone(); // <<-- CHANGED
                     let ice_candidate_queue_clone = ice_candidate_queue.clone();
@@ -235,14 +243,20 @@ fn app() -> Html {
     
                     let constraints = MediaStreamConstraints::new();
                     constraints.set_video(&JsValue::TRUE);
-                    constraints.set_audio(&JsValue::TRUE);  // BRUH BRUH BRUH 
+                    // Echo cancellation maybe
+                    //constraints.set_audio(&JsValue::TRUE);  // BRUH BRUH BRUH 
+                    let mut audio_constraints = MediaTrackConstraints::new();
+                    audio_constraints.echo_cancellation(&JsValue::from(true));
+                    // For Chrome-based browsers
+                    audio_constraints.echo_cancellation(&JsValue::from(true));  
+                    constraints.set_audio(&audio_constraints.into());
                     let promise = media_devices
                         .get_user_media_with_constraints(&constraints)
                         .expect("getUserMedia should work");
     
                     let video_for_async = video_ref_clone.clone();
                     let pc_for_tracks = pc.clone();
-    
+                    let local_track_ids_for_async = local_track_ids.clone();
                     wasm_bindgen_futures::spawn_local(async move {
                         let stream_js = JsFuture::from(promise).await.expect("failed to get media stream");
                         let stream: MediaStream = stream_js.dyn_into().unwrap();
@@ -261,6 +275,7 @@ fn app() -> Html {
                             let track_val = tracks.get(i);
                             if !track_val.is_undefined() {
                                 let track: MediaStreamTrack = track_val.dyn_into().unwrap();
+                                local_track_ids_for_async.borrow_mut().push(track.id());
                                 let empty_array = Array::new();
                                 let _ = pc_for_tracks.add_track(&track, &stream, &empty_array);
                             }

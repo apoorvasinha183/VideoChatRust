@@ -29,7 +29,8 @@ web-sys = { version = "0.3", features = [
     "RtcSdpType",                 # Needed for specifying Offer/Answer types
     "RtcIceServer",
     "RtcIceTransportPolicy",
-    "RtcIceConnectionState"
+    "RtcIceConnectionState",
+    "MediaTrackConstraints"
 ] }
 gloo = "0.7"
 wasm-bindgen-futures = "0.4"
