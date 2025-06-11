@@ -17,46 +17,6 @@
     </style>
   </head>
   <body>
-    <!-- Visitor count display -->
-    <div id="visitor-count">0</div>
-    
-    <!-- The Yew app will mount to the document body automatically. -->
-    
-    <!-- Add the visitor counter script -->
-    <script>
-      (function () {
-        // Change the WebSocket URL as needed.
-        const wsUrl = `wss://${window.location.host}/visitors`;
-        const countElem = document.getElementById("visitor-count");
-        if (!countElem) {
-          console.error("No element with id 'visitor-count' found.");
-          return;
-        }
-        const ws = new WebSocket(wsUrl);
-
-        ws.onopen = function () {
-          console.log("Connected to visitor counter.");
-        };
-
-        ws.onmessage = function (event) {
-          try {
-            const data = JSON.parse(event.data);
-            if (data.visitorCount !== undefined) {
-              countElem.textContent = data.visitorCount;
-            }
-          } catch (err) {
-            console.error("Error parsing visitor count message:", err);
-          }
-        };
-
-        ws.onclose = function () {
-          console.log("Disconnected from visitor counter.");
-        };
-
-        window.addEventListener("beforeunload", function () {
-          ws.close();
-        });
-      })();
-    </script>
+  <!-- The Yew app will mount to the document body automatically. -->
   </body>
 </html>
