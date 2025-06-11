@@ -40,3 +40,5 @@ log = "0.4"
 js-sys = "0.3"
 gloo-timers = { version = "0.2", features = ["futures"] }
 wasm-logger = "0.2"
+shared = { path = "../shared" }
+

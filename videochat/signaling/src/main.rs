@@ -5,6 +5,7 @@ use warp::Filter;
 use tokio::sync::mpsc;
 use serde_json::json;
 use rand::random;
+use shared::{SignalMessage};
 //type Clients = Arc<Mutex<Vec<tokio::sync::mpsc::UnboundedSender<Message>>>>;
 type ClientId = usize;
 type Clients = Arc<Mutex<Vec<(ClientId, tokio::sync::mpsc::UnboundedSender<Message>)>>>;
@@ -71,7 +72,13 @@ async fn handle_connection(ws: WebSocket, clients: Clients) {
     while let Some(result) = ws_rx.next().await {
         match result {
             Ok(msg) => {
-                println!("Received signaling message from client {}: {:?}", client_id, msg);
+                if let Ok(text) = msg.to_str() {
+                    if let Ok(parsed) = serde_json::from_str::<SignalMessage>(text) {
+                        println!("Received message from {}: {:?}", client_id, parsed);
+                    } else {
+                        println!("Received non-signal text from {}: {}", client_id, text);
+                    }
+                }
                 broadcast_message(msg, &clients, client_id).await;
             }
             Err(e) => {
@@ -95,14 +102,22 @@ async fn handle_connection(ws: WebSocket, clients: Clients) {
 
 async fn broadcast_message(msg: Message, clients: &Clients, sender_id: ClientId) {
     let clients_lock = clients.lock().unwrap();
-    println!("Broadcasting message from sender {} to {} clients", sender_id, clients_lock.len());
+    println!(
+        "Broadcasting message from sender {} to {} clients",
+        sender_id,
+        clients_lock.len()
+    );
+
+    if let Ok(text) = msg.to_str() {
+        if let Ok(parsed) = serde_json::from_str::<SignalMessage>(text) {
+            println!("Parsed SignalMessage: {:?}", parsed);
+        }
+    }
+
     for (client_id, tx) in clients_lock.iter() {
         if *client_id != sender_id {
-            // Wrap the message text in a JSON structure
-            if let Ok(text) = msg.to_str() {
-                let _ = tx.send(msg.clone());
-                println!("Sent message to client id {}", client_id);
-            }
+            let _ = tx.send(msg.clone());
+            println!("Sent message to client id {}", client_id);
         } else {
             println!("Skipping sender id {}", sender_id);
         }
