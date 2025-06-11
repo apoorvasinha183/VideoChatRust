@@ -10,26 +10,14 @@ use yew::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use serde_json;
 use js_sys::{Array, Reflect};
-use serde::{Serialize, Deserialize};
+
 use std::rc::Rc;
 use std::cell::RefCell;
 mod visitor_counter;
+mod signaling;
 use visitor_counter::VisitorCounter;
 use web_sys::MediaTrackConstraints;
-#[derive(Serialize, Deserialize)]
-struct IceCandidateData {
-    candidate: String,
-    sdp_mid: Option<String>,
-    sdp_m_line_index: Option<u16>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
-enum SignalMessage {
-    Offer(String),
-    Answer(String),
-    IceCandidate(IceCandidateData)
-}
+use signaling::{IceCandidateData, SignalMessage};
 
 #[function_component(App)]
 fn app() -> Html {
